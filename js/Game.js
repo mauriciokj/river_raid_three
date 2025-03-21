@@ -37,6 +37,7 @@ export default class Game {
         this.createSceneryObjects(15);
         
         this.projectiles = [];
+        this.explosions = [];
         
         this.score = 0;
         this.scoreDisplay = document.getElementById('scoreDisplay');
@@ -58,6 +59,10 @@ export default class Game {
         if (autoStart) {
             this.start();
         }
+        
+        // Adicionar carregamento de sons
+        this.loadSounds();
+        
     }
     
     // Method to start the game
@@ -124,6 +129,92 @@ export default class Game {
         this.scene.add(projectile.mesh);
         this.projectiles.push(projectile);
     }
+    
+    // Create explosion effect
+    createExplosion(position) {
+        // Create a larger, more visible explosion
+        const particleCount = 50;
+        const particles = new THREE.Group();
+        
+        // Create explosion particles with larger size and brighter colors
+        for (let i = 0; i < particleCount; i++) {
+            const size = 0.2 + Math.random() * 0.3; // Larger particles
+            const particle = new THREE.Mesh(
+                new THREE.SphereGeometry(size, 8, 8),
+                new THREE.MeshBasicMaterial({ 
+                    color: Math.random() > 0.5 ? 0xff4500 : 0xffcc00,
+                    transparent: true,
+                    opacity: 1
+                })
+            );
+            
+            // Set initial position at the explosion center
+            particle.position.copy(position);
+            
+            // Random velocity in all directions with higher speed
+            particle.userData.velocity = new THREE.Vector3(
+                (Math.random() - 0.5) * 0.5,
+                (Math.random() - 0.5) * 0.5,
+                (Math.random() - 0.5) * 0.5
+            );
+            
+            // Add to group
+            particles.add(particle);
+        }
+        
+        // Add particles to scene
+        this.scene.add(particles);
+        
+        // Store the creation time
+        particles.userData.creationTime = Date.now();
+        
+        // Add to explosions array
+        this.explosions.push(particles);
+        
+        // Debug log
+        console.log("Explosion created at", position.x, position.y, position.z);
+        console.log("Number of explosions:", this.explosions.length);
+    }
+
+    // Update explosion particles
+    updateExplosions() {
+        if (!this.explosions || this.explosions.length === 0) return;
+        
+        const currentTime = Date.now();
+        
+        // Debug log
+        if (this.explosions.length > 0) {
+            console.log("Updating", this.explosions.length, "explosions");
+        }
+        
+        // Update each explosion
+        for (let i = this.explosions.length - 1; i >= 0; i--) {
+            const explosion = this.explosions[i];
+            const age = currentTime - explosion.userData.creationTime;
+            
+            // Remove explosion after 1.5 seconds
+            if (age > 1500) {
+                this.scene.remove(explosion);
+                this.explosions.splice(i, 1);
+                console.log("Removed explosion, remaining:", this.explosions.length);
+                continue;
+            }
+            
+            // Update each particle
+            explosion.children.forEach(particle => {
+                // Move particle according to its velocity
+                particle.position.add(particle.userData.velocity);
+                
+                // Fade out particle (reduce opacity)
+                const material = particle.material;
+                material.opacity = 1 - (age / 1500);
+                
+                // Reduce size over time
+                const scale = 1 - (age / 1500) * 0.5;
+                particle.scale.set(scale, scale, scale);
+            });
+        }
+    }
 
     setupControls() {
         // Movement controls
@@ -179,12 +270,69 @@ export default class Game {
             const enemyBox = enemy.getCollisionBox();
             
             if (playerBox.intersectsBox(enemyBox)) {
-                this.handleCollision();
+                this.handleCollision("enemy");
                 break;
             }
         }
+        
+        // Check collisions with river banks - improved detection
+        const playerX = this.player.object.position.x;
+        const riverBoundary = this.riverWidth / 2;
+        
+        // If player crosses river boundary, trigger collision
+        // Using a tighter boundary check to ensure detection works
+        if (Math.abs(playerX) > riverBoundary - 0.8) {
+            console.log("River bank collision detected!");
+            this.handleCollision("bank");
+        }
     }
-
+    
+    handleCollision(type = "enemy") {
+        // Prevent multiple collisions in quick succession
+        if (this.isColliding) return;
+        this.isColliding = true;
+        
+        console.log("Collision detected with:", type);
+        
+        // Simple collision response - flash the background red
+        this.scene.background = new THREE.Color(0xff0000);
+        
+        // Store player position before hiding
+        const playerPosition = this.player.object.position.clone();
+        
+        // Create explosion effect at player position
+        this.createExplosion(playerPosition);
+        
+        // Play explosion sound - melhorado com fallback
+        this.playExplosionSound();
+        
+        // Make player temporarily invisible
+        this.player.object.visible = false;
+        
+        // Reset after a short delay
+        setTimeout(() => {
+            this.scene.background = new THREE.Color(0x87CEEB);
+            
+            // Decrease lives
+            this.lives--;
+            this.updateLivesDisplay();
+            
+            // Check if game over
+            if (this.lives <= 0) {
+                this.gameOver();
+            } else {
+                // Reset player position but keep score
+                this.player.object.position.set(0, 0.2, 5);
+                this.player.object.visible = true;
+            }
+            
+            // Allow new collisions
+            setTimeout(() => {
+                this.isColliding = false;
+            }, 1000);
+        }, 500);
+    }
+    
     // Create lives display
     createLivesDisplay() {
         this.livesDisplay = document.createElement('div');
@@ -303,25 +451,69 @@ export default class Game {
         this.animate();
     }
     
-    handleCollision() {
-        // Simple collision response - flash the background red
-        this.scene.background = new THREE.Color(0xff0000);
+    // Carregar sons do jogo
+    loadSounds() {
+        // Criar um listener de áudio
+        this.listener = new THREE.AudioListener();
+        this.camera.add(this.listener);
         
-        // Reset after a short delay
-        setTimeout(() => {
-            this.scene.background = new THREE.Color(0x87CEEB);
-        }, 200);
+        // Criar um som para a explosão
+        this.explosionSound = new THREE.Audio(this.listener);
         
-        // Decrease lives instead of resetting score
-        this.lives--;
-        this.updateLivesDisplay();
+        // Carregar o arquivo de som
+        const audioLoader = new THREE.AudioLoader();
         
-        // Check if game over
-        if (this.lives <= 0) {
-            this.gameOver();
-        } else {
-            // Reset player position but keep score
-            this.player.object.position.set(0, 0.2, 5);
+        // Usar caminho relativo e adicionar fallback para HTML5 Audio
+        audioLoader.load('./sounds/explosion.mp3', 
+            // onLoad callback
+            (buffer) => {
+                this.explosionSound.setBuffer(buffer);
+                this.explosionSound.setVolume(0.7); // Aumentar volume
+                console.log('Som de explosão carregado com sucesso');
+            },
+            // onProgress callback
+            (xhr) => {
+                console.log((xhr.loaded / xhr.total * 100) + '% carregado');
+            },
+            // onError callback
+            (err) => {
+                console.error('Erro ao carregar som:', err);
+                // Criar um elemento de áudio HTML como fallback
+                this.createFallbackAudio();
+            }
+        );
+        
+        // Criar um elemento de áudio HTML como fallback
+        this.createFallbackAudio();
+    }
+    
+    // Criar um elemento de áudio HTML como fallback
+    createFallbackAudio() {
+        this.fallbackExplosion = document.createElement('audio');
+        this.fallbackExplosion.src = './sounds/explosion.mp3';
+        this.fallbackExplosion.preload = 'auto';
+        document.body.appendChild(this.fallbackExplosion);
+    }
+    
+    // Método para reproduzir o som de explosão com fallback
+    playExplosionSound() {
+        // Tentar reproduzir com Three.js Audio
+        if (this.explosionSound && this.explosionSound.buffer) {
+            if (this.explosionSound.isPlaying) {
+                this.explosionSound.stop();
+            }
+            this.explosionSound.play();
+            console.log('Reproduzindo som de explosão com Three.js');
+        } 
+        // Fallback para HTML5 Audio
+        else if (this.fallbackExplosion) {
+            this.fallbackExplosion.currentTime = 0;
+            this.fallbackExplosion.play()
+                .then(() => console.log('Reproduzindo som de explosão com fallback'))
+                .catch(err => console.error('Erro ao reproduzir som de fallback:', err));
+        }
+        else {
+            console.warn('Nenhum som de explosão disponível');
         }
     }
     
@@ -481,6 +673,9 @@ export default class Game {
                 this.projectiles.splice(i, 1);
             }
         }
+        
+        // Update explosions - ensure this is called every frame
+        this.updateExplosions();
         
         // Check for collisions
         this.checkCollisions();
