@@ -27,7 +27,9 @@ export default class Game {
         this.riverWidth = this.environment.getRiverWidth();
         this.riverLength = this.environment.getRiverLength();
         
-        this.player = new Player(this.riverWidth);
+        this.player = new Player(this.riverWidth, () => {
+            console.log("Player model loaded successfully");
+        });
         this.scene.add(this.player.object);
         
         this.enemies = [];
