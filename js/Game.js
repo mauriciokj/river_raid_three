@@ -19,6 +19,10 @@ export default class Game {
         // Create game over screen (hidden initially)
         this.createGameOverScreen();
         
+        // Create continue message (hidden initially)
+        this.createContinueMessage();
+        this.continueMessageVisible = false;
+        
         this.setupScene();
         this.setupCameras();
         this.setupRenderer();
@@ -232,6 +236,13 @@ export default class Game {
             if (this.keys.hasOwnProperty(e.key)) {
                 this.keys[e.key] = true;
             }
+            
+            // Check for space key to continue after death
+            if (e.key === ' ' && !this.isRunning && this.continueMessageVisible) {
+                this.hideContinueMessage();
+                this.isRunning = true;
+                this.animate();
+            }
         });
         
         window.addEventListener('keyup', (e) => {
@@ -300,8 +311,8 @@ export default class Game {
         // Store player position before hiding
         const playerPosition = this.player.object.position.clone();
         
-        // Create explosion effect at player position
-        this.createExplosion(playerPosition);
+        // Create explosion effect at player position (with full particle count)
+        this.createExplosion(playerPosition, false); // false = player explosion
         
         // Play explosion sound - melhorado com fallback
         this.playExplosionSound();
@@ -321,6 +332,12 @@ export default class Game {
             if (this.lives <= 0) {
                 this.gameOver();
             } else {
+                // Pause the game
+                this.isRunning = false;
+                
+                // Create continue message
+                this.showContinueMessage();
+                
                 // Reset player position but keep score
                 this.player.object.position.set(0, 0.2, 5);
                 this.player.object.visible = true;
@@ -425,10 +442,46 @@ export default class Game {
         this.gameOverScreen.style.display = 'flex';
     }
     
+    // Create continue message
+    createContinueMessage() {
+        this.continueMessage = document.createElement('div');
+        this.continueMessage.id = 'continueMessage';
+        this.continueMessage.style.position = 'absolute';
+        this.continueMessage.style.top = '50%';
+        this.continueMessage.style.left = '50%';
+        this.continueMessage.style.transform = 'translate(-50%, -50%)';
+        this.continueMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        this.continueMessage.style.color = 'white';
+        this.continueMessage.style.padding = '20px';
+        this.continueMessage.style.borderRadius = '10px';
+        this.continueMessage.style.fontFamily = 'Arial, sans-serif';
+        this.continueMessage.style.fontSize = '24px';
+        this.continueMessage.style.textAlign = 'center';
+        this.continueMessage.style.zIndex = '200';
+        this.continueMessage.style.display = 'none';
+        this.continueMessage.textContent = 'Pressione ESPAÇO para continuar';
+        document.body.appendChild(this.continueMessage);
+    }
+    
+    // Show continue message
+    showContinueMessage() {
+        this.continueMessage.style.display = 'block';
+        this.continueMessageVisible = true;
+    }
+    
+    // Hide continue message
+    hideContinueMessage() {
+        this.continueMessage.style.display = 'none';
+        this.continueMessageVisible = false;
+    }
+    
     // Restart the game
     restartGame() {
         // Hide game over screen
         this.gameOverScreen.style.display = 'none';
+        
+        // Hide continue message if visible
+        this.hideContinueMessage();
         
         // Reset lives
         this.lives = this.maxLives;
@@ -438,8 +491,9 @@ export default class Game {
         this.score = 0;
         this.scoreDisplay.textContent = this.score;
         
-        // Reset player position
+        // Reset player position and ensure visibility
         this.player.object.position.set(0, 0.2, 5);
+        this.player.object.visible = true;
         
         // Reset enemies
         for (const enemy of this.enemies) {
@@ -616,6 +670,15 @@ export default class Game {
                     projectile.active = false;
                     this.scene.remove(projectile.mesh);
                     
+                    // Store enemy position before resetting
+                    const enemyPosition = enemy.object.position.clone();
+                    
+                    // Create explosion effect at enemy position (with fewer particles)
+                    this.createExplosion(enemyPosition, true); // true = enemy explosion
+                    
+                    // Play explosion sound
+                    this.playExplosionSound();
+                    
                     // Reset enemy position
                     enemy.resetPosition();
                     
@@ -635,6 +698,8 @@ export default class Game {
     animate() {
         if (!this.isRunning) return;
         
+        // Só solicita o próximo frame se o jogo ainda estiver rodando
+        // Isso garante que o loop de animação pare completamente quando isRunning for false
         requestAnimationFrame(this.animate.bind(this));
         
         // Always move scenery objects to create constant forward movement
