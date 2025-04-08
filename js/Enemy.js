@@ -1,13 +1,97 @@
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three/build/three.module.js';
+// Usamos o THREE global carregado pelo script no HTML
 
 export default class Enemy {
     constructor(riverWidth, riverLength) {
         this.riverWidth = riverWidth;
         this.riverLength = riverLength;
-        this.object = this.createEnemy();
+        this.modelScale = 0.005; // Aumentado de 0.0015 para ter mais detalhes visíveis
+        this.object = null;
+        this.active = true; // Flag para controle de estado do inimigo
+        
+        // Carregar o modelo 3D do navio
+        this.loadShipModel();
     }
 
-    createEnemy() {
+    loadShipModel() {
+        const loader = new THREE.GLTFLoader();
+        const modelUrl = '../models/warship.glb?v=' + Date.now(); // Evitar cache
+        
+        // Criar um grupo temporário vazio enquanto o modelo carrega
+        this.object = new THREE.Group();
+        this.resetPosition(this.object);
+        
+        loader.load(
+            modelUrl,
+            // Callback de sucesso
+            (gltf) => {
+                const model = gltf.scene;
+                
+                // Configurar o modelo
+                model.scale.set(this.modelScale, this.modelScale, this.modelScale);
+                
+                // Rotacionar para a orientação correta:
+                // 1. Girar no eixo Y para ficar perpendicular à direção do avião (formando um T)
+                model.rotation.y = Math.PI/2; // 90 graus, perpendicular à direção de scroll
+                // 2. Manter na horizontal sobre a água
+                model.rotation.z = Math.PI/2; 
+                // 3. Inverter a orientação para que o casco fique para baixo
+                model.rotation.x = -Math.PI/2; // Invertido para -90 graus
+                
+                // Ajuste de posição para parecer parcialmente imerso na água
+                model.position.y = 0.07; // Valor intermediário para ficar parcialmente submerso
+                
+                // Aplicar materiais para melhor aparência
+                model.traverse((child) => {
+                    if (child.isMesh) {
+                        // Melhora a aparência com materiais mais realistas
+                        child.material = new THREE.MeshStandardMaterial({
+                            color: child.material.color || 0x888888,
+                            metalness: 0.7,
+                            roughness: 0.3,
+                            emissive: 0x222222,
+                            emissiveIntensity: 0.2
+                        });
+                        
+                        // Ativar sombras
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                    }
+                });
+                
+                // Substituir o grupo temporário pelo modelo carregado
+                const oldPosition = this.object.position.clone();
+                const wasVisible = this.object.visible;
+                
+                // Limpar o grupo antigo
+                while (this.object.children.length > 0) {
+                    this.object.remove(this.object.children[0]);
+                }
+                
+                // Adicionar o modelo ao grupo
+                this.object.add(model);
+                
+                // Restaurar posição e visibilidade
+                this.object.position.copy(oldPosition);
+                this.object.visible = wasVisible;
+                
+                console.log("Modelo de navio carregado com sucesso");
+            },
+            // Callback de progresso (opcional)
+            (xhr) => {
+                const percentLoaded = (xhr.loaded / xhr.total * 100).toFixed(2);
+                console.log(`Carregando navio: ${percentLoaded}%`);
+            },
+            // Callback de erro
+            (error) => {
+                console.error("Erro ao carregar o modelo do navio:", error);
+                
+                // Criar um modelo de fallback simples (navio pixelado original)
+                this.createPixelShip();
+            }
+        );
+    }
+
+    createPixelShip() {
         const enemy = new THREE.Group();
         
         // Create a pixel-art style enemy ship
@@ -53,22 +137,36 @@ export default class Enemy {
         // Position adjustments
         enemy.rotation.x = Math.PI/2; // Lay flat horizontally
         
-        // Random position within the river
-        this.resetPosition(enemy);
+        // Substituir o grupo existente
+        const oldPosition = this.object.position.clone();
+        const wasVisible = this.object.visible;
         
-        // Add collision box
-        enemy.userData.collisionBox = new THREE.Box3().setFromObject(enemy);
+        // Limpar o grupo antigo
+        while (this.object.children.length > 0) {
+            this.object.remove(this.object.children[0]);
+        }
         
-        return enemy;
+        // Adicionar o navio pixel art
+        this.object.add(enemy);
+        
+        // Restaurar posição e visibilidade
+        this.object.position.copy(oldPosition);
+        this.object.visible = wasVisible;
+        
+        console.log("Modelo de fallback criado para o navio");
     }
 
     resetPosition(enemyObject = this.object) {
         const maxX = this.riverWidth/2 - 1;
         enemyObject.position.set(
             (Math.random() * 2 - 1) * maxX, // Random x within river
-            0.2,
+            0.05, // Baixar para ficar parcialmente submerso na água
             -this.riverLength/2 - Math.random() * 10 // Start above the visible area
         );
+        
+        // Garantir que o inimigo esteja visível e ativo após reposicionamento
+        this.object.visible = true;
+        this.active = true;
     }
 
     move(speed) {
@@ -81,7 +179,41 @@ export default class Enemy {
     }
 
     getCollisionBox() {
-        this.object.userData.collisionBox.setFromObject(this.object);
-        return this.object.userData.collisionBox;
+        // Criar uma caixa de colisão ligeiramente menor que o objeto para colisões mais precisas
+        const box = new THREE.Box3().setFromObject(this.object);
+        
+        // Reduzir ligeiramente o tamanho da caixa de colisão
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        
+        // Reduzir o tamanho da caixa em 20%
+        size.multiplyScalar(0.8);
+        
+        // Recalcular a caixa com tamanho reduzido
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        
+        const reducedBox = new THREE.Box3();
+        reducedBox.setFromCenterAndSize(center, size);
+        
+        return reducedBox;
+    }
+
+    // Retorna a posição atual do inimigo para criação de explosão
+    getPosition() {
+        return this.object.position.clone();
+    }
+    
+    // Desativa o inimigo, tornando-o invisível temporariamente
+    deactivate() {
+        this.active = false;
+        this.object.visible = false;
+    }
+    
+    // Reativa o inimigo e reposiciona
+    reactivate() {
+        this.active = true;
+        this.object.visible = true;
+        this.resetPosition();
     }
 }

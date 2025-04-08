@@ -1,4 +1,4 @@
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three/build/three.module.js';
+// Usamos o THREE global carregado pelo script no HTML
 
 export default class SceneryObject {
     constructor(isLeft, riverWidth, riverLength) {
